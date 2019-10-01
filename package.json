@@ -1,0 +1,13 @@
+{
+    "name": "kid-bash-photo-booth",
+    "version": "1.0.0",
+    "main": "index.js",
+    "scripts": {
+        "start": "electron ."
+    },
+    "author": "Faisal Pratama Putra",
+    "license": "WTFPL",
+    "dependencies": {
+        "electron": "^6.0.10"
+    }
+}

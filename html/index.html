@@ -1,0 +1,318 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <style>
+        html, body {
+            padding: 0;
+            margin: 0;
+            overflow: hidden;
+        }
+        canvas, #config {
+            width: 100vw;
+            height: 100vh;
+            position: fixed;
+            top: 0;
+            left: 0;
+            image-rendering: pixelated;
+        }
+        #config {
+            width: 50vw;
+            background-color: rgb(0, 0, 0, .75);
+            font-family: monospace;
+            color: white;
+        }
+        #config h1 {
+            font-size: 8vmin;
+        }
+        #config h2 {
+            font-size: 4vmin;
+        }
+        #config h3 {
+            font-size: 2vmin;
+        }
+        #config input {
+            width: 50vmin;
+            height: 2vmin;
+        }
+    </style>
+</head>
+<body>
+    <canvas id="canvas" width="100" height="200">
+    </canvas>
+    <div id="config" hidden>
+        <h1>
+            Config
+        </h1>
+        <div>
+            <h2>
+                Brightness
+            </h2>
+            <input id="config_brightness" type="range" value="0" min="-1" max="1" step=".001" onchange="configRefresh()">
+        </div>
+        <div>
+            <h2>
+                Dimension
+            </h2>
+            <div>
+                <h3>
+                    Width
+                </h3>
+                <input id="config_dimension_width" type="number" value="100" onchange="configRefresh()">
+            </div>
+            <div>
+                <h3>
+                    Height
+                </h3>
+                <input id="config_dimension_height" type="number" value="100" onchange="configRefresh()">
+            </div>
+        </div>
+        <div>
+            <h2>
+            Source 
+            </h2>
+            <div>
+                <input id="config_source" type="text" value="http://dl5.webmfiles.org/elephants-dream.webm">
+            </div>
+            <div>
+                <button onclick="sourceFeed()">Source Feed</button>
+                <button onclick="cameraFeed()">Camera Feed</button>
+            </div>
+        </div>
+    </div>
+    <script>
+        const shaderSourceVertex =
+        `
+        attribute mediump vec2 aVertexPosition;
+        attribute mediump vec2 aTextureCoord;
+        varying mediump vec2 vTextureCoord;
+        void main() {
+            gl_Position         = vec4(aVertexPosition.x, 0.0 - aVertexPosition.y, 0.0, 1.0);
+            vTextureCoord       = aTextureCoord;
+        }
+        `
+        const shaderSourceFragment =
+        `
+        varying mediump vec2 vTextureCoord;
+        uniform sampler2D uSampler;
+        uniform mediump float brightness;
+        void main() {
+            bool evenColumn         = (mod(floor(gl_FragCoord.x), 2.0) == 0.0);
+            bool evenRow            = (mod(floor(gl_FragCoord.y), 2.0) == 0.0);
+            mediump vec4 color      = texture2D(uSampler, vTextureCoord);
+            mediump float intensity = (color.r + color.g + color.b) / 3.0;
+            intensity              += brightness;
+            mediump float light     = intensity * 5.0;
+            mediump float decimal   = mod(light, 1.0);
+            if (decimal > 0.25 && .75 < decimal) {
+                if (evenColumn) {
+                    if (evenRow) {
+                        light = ceil(light);
+                    } else {
+                        light = floor(light);
+                    }
+                } else {
+                    if (evenRow) {
+                        light = floor(light);
+                    } else {
+                        light = ceil(light);
+                    }
+                }
+            } else {
+                light = floor(light + 0.5);
+            }
+            light /= 5.0;
+            
+            gl_FragColor    = vec4(light, light + .05, light, 1.0);
+        }
+        `
+        function loadShader(context, type, source) {
+            const shader = context.createShader(type)
+            context.shaderSource(shader, source)
+            context.compileShader(shader)
+            if (!context.getShaderParameter(shader, context.COMPILE_STATUS)) {
+                console.error(context.getShaderInfoLog(shader))
+                context.deleteShader(shader)
+                return null
+            }
+            return shader
+        }
+        function initShaderProgram(context, vsSource, fsSource) {
+            const vertexShader = loadShader(context, context.VERTEX_SHADER, vsSource)
+            const fragmentShader = loadShader(context, context.FRAGMENT_SHADER, fsSource)
+            const shaderProgram = context.createProgram()
+            context.attachShader(shaderProgram, vertexShader)
+            context.attachShader(shaderProgram, fragmentShader)
+            context.linkProgram(shaderProgram)
+            if (!context.getProgramParameter(shaderProgram, context.LINK_STATUS)) {
+                console.error(context.getProgramInfoLog(shaderProgram))
+                return null
+            }
+            return shaderProgram
+        }
+        function initTexture(gl) {
+            const texture = context.createTexture()
+            context.bindTexture(context.TEXTURE_2D, texture)
+            context.texImage2D(
+                context.TEXTURE_2D,
+                0,
+                context.RGBA,
+                1,
+                1,
+                0,
+                context.RGBA,
+                context.UNSIGNED_BYTE,
+                new Uint8Array([0, 0, 255, 255]))
+            context.texParameteri(context.TEXTURE_2D, context.TEXTURE_MIN_FILTER, context.NEAREST)
+            context.texParameteri(context.TEXTURE_2D, context.TEXTURE_WRAP_S, context.CLAMP_TO_EDGE)
+            context.texParameteri(context.TEXTURE_2D, context.TEXTURE_WRAP_T, context.CLAMP_TO_EDGE)
+            return texture
+        }
+        function updateTexture(context, texture, video) {
+            context.bindTexture(context.TEXTURE_2D, texture)
+            context.texImage2D(
+                context.TEXTURE_2D,
+                0,
+                context.RGBA,
+                context.RGBA,
+                context.UNSIGNED_BYTE,
+                video)
+        }
+        function gameboyShader(gl) {
+            const screen = [
+                -1, -1,
+                1, -1,
+                -1,  1,
+                -1, 1,
+                1, -1,
+                1, 1,
+            ]
+            const textureCoordinates = [
+                0, 0,
+                1, 0,
+                0, 1,
+                0, 1,
+                1, 0,
+                1, 1,
+            ]
+            const shaderProgram = initShaderProgram(context, shaderSourceVertex, shaderSourceFragment)
+            const positionBuffer = context.createBuffer()
+            context.bindBuffer(context.ARRAY_BUFFER, positionBuffer)
+            context.bufferData(
+                context.ARRAY_BUFFER,
+                new Float32Array(screen),
+                context.STATIC_DRAW)
+
+            const textureCoordBuffer = context.createBuffer()
+            context.bindBuffer(context.ARRAY_BUFFER, textureCoordBuffer)
+            context.bufferData(
+                context.ARRAY_BUFFER,
+                new Float32Array(textureCoordinates),
+                context.STATIC_DRAW)
+            return {
+                program: shaderProgram,
+                buffer: {
+                    position: positionBuffer,
+                    textureCoord: textureCoordBuffer
+                },
+                attribute: {
+                    vertexPosition: context.getAttribLocation(shaderProgram, 'aVertexPosition'),
+                    textureCoord: context.getAttribLocation(shaderProgram, 'aTextureCoord'),
+                },
+                uniform: {
+                    uSampler: context.getUniformLocation(shaderProgram, 'uSampler'),
+                    brightness: context.getUniformLocation(shaderProgram, 'brightness'),
+                },
+                init(context) {
+                    context.useProgram(shader.program)
+                    context.bindBuffer(context.ARRAY_BUFFER, shader.buffer.position)
+                    context.vertexAttribPointer(
+                        shader.attribute.vertexPosition,
+                        2,
+                        context.FLOAT,
+                        false,
+                        0,
+                        0)
+                    context.enableVertexAttribArray(shader.attribute.vertexPosition)
+                    context.bindBuffer(context.ARRAY_BUFFER, shader.buffer.textureCoord)
+                    context.vertexAttribPointer(
+                        shader.attribute.textureCoord,
+                        2,
+                        context.FLOAT,
+                        false,
+                        0,
+                        0)
+                    context.enableVertexAttribArray(shader.attribute.textureCoord)
+                    context.activeTexture(context.TEXTURE0)
+                    context.bindTexture(context.TEXTURE_2D, texture)
+                    context.uniform1i(shader.uniform.uSampler, 0)
+                }
+            }
+        }
+    </script>
+    <script>
+        const video                 = document.createElement('video')
+        const canvas                = document.getElementById('canvas')
+        const context               = canvas.getContext('webgl')
+        const config                = document.getElementById('config')
+        const configBrightness      = document.getElementById('config_brightness')
+        const configDimensionWidth  = document.getElementById('config_dimension_width')
+        const configDimensionHeight = document.getElementById('config_dimension_height')
+        const configSource          = document.getElementById('config_source')
+
+        video.loop = true
+        video.muted = true
+        video.autoplay = true
+
+        let brightness
+
+        function cameraFeed() {
+            video.toggleAttribute('src', false)
+            navigator.mediaDevices.getUserMedia({ video: { facingMode: "environment" }, audio: false })
+            .then(stream=>{
+                video.srcObject = stream
+                video.play()
+            })
+            .catch(err=>console.error(err))
+        }
+
+        function sourceFeed() {
+            video.src = configSource.value
+            video.play()
+        }
+
+        function configRefresh() {
+            brightness = configBrightness.value
+            canvas.width = configDimensionWidth.value
+            canvas.height = configDimensionHeight.value
+        }
+        configRefresh()
+
+        const shader = gameboyShader(context)
+        const texture = initTexture(context)
+        shader.init(context)
+        function draw(timestamp) {
+            updateTexture(context, texture, video)
+            context.clearColor(1.0, 0.0, 0.0, 1.0)
+            context.clear(context.COLOR_BUFFER_BIT | context.COLOR_BUFFER_BIT)
+            context.viewport(0, 0, context.canvas.width, context.canvas.height)
+            context.uniform1f(shader.uniform.brightness, brightness)
+            context.drawArrays(context.TRIANGLES, 0, 6)
+            requestAnimationFrame(draw)
+        }
+
+        window.addEventListener('keyup',e=>{
+            switch (e.key) {
+                case 'q':
+                    config.toggleAttribute('hidden')
+                break
+                case 'x':
+                    window.close()
+                break
+            }
+        }, true)
+
+        requestAnimationFrame(draw)
+    </script>
+</body>
+</html>
