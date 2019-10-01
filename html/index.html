@@ -87,7 +87,7 @@
         attribute mediump vec2 aTextureCoord;
         varying mediump vec2 vTextureCoord;
         void main() {
-            gl_Position         = vec4(aVertexPosition.x, 0.0 - aVertexPosition.y, 0.0, 1.0);
+            gl_Position         = vec4(0.0 - aVertexPosition.x, 0.0 - aVertexPosition.y, 0.0, 1.0);
             vTextureCoord       = aTextureCoord;
         }
         `
@@ -102,7 +102,7 @@
             mediump vec4 color      = texture2D(uSampler, vTextureCoord);
             mediump float intensity = (color.r + color.g + color.b) / 3.0;
             intensity              += brightness;
-            mediump float light     = intensity * 5.0;
+            mediump float light     = intensity * 4.0;
             mediump float decimal   = mod(light, 1.0);
             if (decimal > 0.25 && .75 < decimal) {
                 if (evenColumn) {
@@ -121,7 +121,7 @@
             } else {
                 light = floor(light + 0.5);
             }
-            light /= 5.0;
+            light /= 4.0;
             
             gl_FragColor    = vec4(light, light + .05, light, 1.0);
         }
@@ -251,9 +251,12 @@
         }
     </script>
     <script>
+        const electron              = require('electron')
+        const print                 = electron.remote.require('./index.js').print
+        
         const video                 = document.createElement('video')
         const canvas                = document.getElementById('canvas')
-        const context               = canvas.getContext('webgl')
+        const context               = canvas.getContext('webgl', {preserveDrawingBuffer: true})
         const config                = document.getElementById('config')
         const configBrightness      = document.getElementById('config_brightness')
         const configDimensionWidth  = document.getElementById('config_dimension_width')
@@ -300,7 +303,39 @@
             context.drawArrays(context.TRIANGLES, 0, 6)
             requestAnimationFrame(draw)
         }
-
+        
+        const filter = {
+            matrix:[
+                0,     128,
+                128,    0],
+            dimension: 2
+        }
+        function takePicture() {
+            const canvasPicture     = document.createElement('canvas')
+            canvasPicture.width     = canvas.width
+            canvasPicture.height    = canvas.height
+            const contextPicture    = canvasPicture.getContext('2d')
+            contextPicture.filter   = 'grayscale(1)'
+            contextPicture.drawImage(video, 0, 0)
+            let imageData   = contextPicture.getImageData(0, 0, canvas.width, canvas.height)
+            let data        = imageData.data
+            for (let i = 0; i < data.length; i+=4) {
+                let pixelCount = i / 4
+                let evenRow = (pixelCount % (canvas.width * 2)) > canvas.width
+                if (data[i] > filter.matrix[(filter.dimension % pixelCount) + (evenRow?filter.dimension:0)]) {
+                    data[i] = data[i + 1]  = data[i + 2] = 255
+                } else {
+                    data[i] = data[i + 1]  = data[i + 2] = 0
+                }
+            }
+            contextPicture.putImageData(imageData, 0, 0)
+            canvasPicture.toBlob(blob=>{
+                blob
+                .arrayBuffer()
+                .then(buffer=>print(buffer))
+            }, 'image/png')
+        }
+        
         window.addEventListener('keyup',e=>{
             switch (e.key) {
                 case 'q':
@@ -308,6 +343,9 @@
                 break
                 case 'x':
                     window.close()
+                break
+                case 'l':
+                    takePicture()
                 break
             }
         }, true)
