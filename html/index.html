@@ -21,6 +21,7 @@
             background-color: rgb(0, 0, 0, .75);
             font-family: monospace;
             color: white;
+            overflow-y: scroll;
         }
         #config h1 {
             font-size: 8vmin;
@@ -31,9 +32,8 @@
         #config h3 {
             font-size: 2vmin;
         }
-        #config input {
+        #config input:not(input[type=checkbox]) {
             width: 50vmin;
-            height: 2vmin;
         }
     </style>
 </head>
@@ -46,9 +46,32 @@
         </h1>
         <div>
             <h2>
-                Brightness
+            Source 
             </h2>
-            <input id="config_brightness" type="range" value="0" min="-1" max="1" step=".001" onchange="configRefresh()">
+            <div>
+                <input id="config_source" type="text" value="http://dl5.webmfiles.org/elephants-dream.webm">
+            </div>
+            <div>
+                <button onclick="sourceFeed()">Source Feed</button>
+                <button onclick="cameraFeed()">Camera Feed</button>
+            </div>
+        </div>
+        <div>
+            <h2>
+                Contrast & Brightness
+            </h2>
+            <div>
+                <h3>
+                    Contrast
+                </h3>
+                <input id="config_contrast" type="range" value="1" min="-5" max="5" step=".01" onchange="configRefresh()">
+            </div>
+            <div>
+                <h3>
+                    Brightness
+                </h3>
+                <input id="config_brightness" type="range" value="0" min="-5" max="5" step=".01" onchange="configRefresh()">
+            </div>
         </div>
         <div>
             <h2>
@@ -69,63 +92,19 @@
         </div>
         <div>
             <h2>
-            Source 
+                Flip
             </h2>
             <div>
-                <input id="config_source" type="text" value="http://dl5.webmfiles.org/elephants-dream.webm">
+                <input id="config_flip_horizontal" type="checkbox" onchange="configRefresh()" checked>
+                <label for="config_flip_horizontal">Horizontal</label>
             </div>
             <div>
-                <button onclick="sourceFeed()">Source Feed</button>
-                <button onclick="cameraFeed()">Camera Feed</button>
+                <input id="config_flip_vertical" type="checkbox" onchange="configRefresh()">
+                <label for="config_flip_vertical">Vertical</label>
             </div>
         </div>
     </div>
     <script>
-        const shaderSourceVertex =
-        `
-        attribute mediump vec2 aVertexPosition;
-        attribute mediump vec2 aTextureCoord;
-        varying mediump vec2 vTextureCoord;
-        void main() {
-            gl_Position         = vec4(0.0 - aVertexPosition.x, 0.0 - aVertexPosition.y, 0.0, 1.0);
-            vTextureCoord       = aTextureCoord;
-        }
-        `
-        const shaderSourceFragment =
-        `
-        varying mediump vec2 vTextureCoord;
-        uniform sampler2D uSampler;
-        uniform mediump float brightness;
-        void main() {
-            bool evenColumn         = (mod(floor(gl_FragCoord.x), 2.0) == 0.0);
-            bool evenRow            = (mod(floor(gl_FragCoord.y), 2.0) == 0.0);
-            mediump vec4 color      = texture2D(uSampler, vTextureCoord);
-            mediump float intensity = (color.r + color.g + color.b) / 3.0;
-            intensity              += brightness;
-            mediump float light     = intensity * 4.0;
-            mediump float decimal   = mod(light, 1.0);
-            if (decimal > 0.25 && .75 < decimal) {
-                if (evenColumn) {
-                    if (evenRow) {
-                        light = ceil(light);
-                    } else {
-                        light = floor(light);
-                    }
-                } else {
-                    if (evenRow) {
-                        light = floor(light);
-                    } else {
-                        light = ceil(light);
-                    }
-                }
-            } else {
-                light = floor(light + 0.5);
-            }
-            light /= 4.0;
-            
-            gl_FragColor    = vec4(light, light + .05, light, 1.0);
-        }
-        `
         function loadShader(context, type, source) {
             const shader = context.createShader(type)
             context.shaderSource(shader, source)
@@ -150,102 +129,169 @@
             }
             return shaderProgram
         }
-        function initTexture(gl) {
+        function initTexture(gl, src) {
             const texture = context.createTexture()
             context.bindTexture(context.TEXTURE_2D, texture)
-            context.texImage2D(
-                context.TEXTURE_2D,
-                0,
-                context.RGBA,
-                1,
-                1,
-                0,
-                context.RGBA,
-                context.UNSIGNED_BYTE,
-                new Uint8Array([0, 0, 255, 255]))
+            context.texImage2D(context.TEXTURE_2D, 0, context.RGBA, 1, 1, 0, context.RGBA, context.UNSIGNED_BYTE, src)
             context.texParameteri(context.TEXTURE_2D, context.TEXTURE_MIN_FILTER, context.NEAREST)
             context.texParameteri(context.TEXTURE_2D, context.TEXTURE_WRAP_S, context.CLAMP_TO_EDGE)
             context.texParameteri(context.TEXTURE_2D, context.TEXTURE_WRAP_T, context.CLAMP_TO_EDGE)
             return texture
         }
-        function updateTexture(context, texture, video) {
+        function updateTexture(context, texture, src) {
             context.bindTexture(context.TEXTURE_2D, texture)
-            context.texImage2D(
-                context.TEXTURE_2D,
-                0,
-                context.RGBA,
-                context.RGBA,
-                context.UNSIGNED_BYTE,
-                video)
+            context.texImage2D( context.TEXTURE_2D, 0, context.RGBA, context.RGBA, context.UNSIGNED_BYTE, src)
         }
-        function gameboyShader(gl) {
-            const screen = [
-                -1, -1,
-                1, -1,
-                -1,  1,
-                -1, 1,
-                1, -1,
-                1, 1,
-            ]
-            const textureCoordinates = [
-                0, 0,
-                1, 0,
-                0, 1,
-                0, 1,
-                1, 0,
-                1, 1,
-            ]
-            const shaderProgram = initShaderProgram(context, shaderSourceVertex, shaderSourceFragment)
-            const positionBuffer = context.createBuffer()
-            context.bindBuffer(context.ARRAY_BUFFER, positionBuffer)
-            context.bufferData(
-                context.ARRAY_BUFFER,
-                new Float32Array(screen),
-                context.STATIC_DRAW)
-
-            const textureCoordBuffer = context.createBuffer()
-            context.bindBuffer(context.ARRAY_BUFFER, textureCoordBuffer)
-            context.bufferData(
-                context.ARRAY_BUFFER,
-                new Float32Array(textureCoordinates),
-                context.STATIC_DRAW)
+        const screen = [
+            -1, -1,
+            1, -1,
+            -1,  1,
+            -1, 1,
+            1, -1,
+            1, 1,
+        ]
+        const screenUV = [
+            0, 0,
+            1, 0,
+            0, 1,
+            0, 1,
+            1, 0,
+            1, 1,
+        ]
+        let screenBuffer
+        let screenUVBuffer
+        function initBuffers(context) {
+            screenBuffer = context.createBuffer()
+            screenUVBuffer = context.createBuffer()
+            context.bindBuffer(context.ARRAY_BUFFER, screenBuffer)
+            context.bufferData(context.ARRAY_BUFFER, new Float32Array(screen), context.STATIC_DRAW)
+            context.bindBuffer(context.ARRAY_BUFFER, screenUVBuffer)
+            context.bufferData(context.ARRAY_BUFFER, new Float32Array(screenUV), context.STATIC_DRAW)
+        }
+    </script>
+    <script>
+        const shaderSourceIntensityVertex =
+        `
+        attribute lowp vec2 aVertexPosition;
+        attribute lowp vec2 aTextureCoord;
+        uniform lowp ivec2 uFlip;
+        varying lowp vec2 vTextureCoord;
+        void main() {
+            gl_Position     = vec4(
+                uFlip.x != 0 ? aVertexPosition.x : 0.0 - aVertexPosition.x, 
+                uFlip.y != 0 ? aVertexPosition.y : 0.0 - aVertexPosition.y, 
+                0.0, 
+                1.0);
+            vTextureCoord   = aTextureCoord;
+        }
+        `
+        const shaderSourceIntensityFragment =
+        `
+        varying lowp vec2 vTextureCoord;
+        uniform lowp vec2 uRange;
+        uniform sampler2D uSampler;
+        void main() {
+            lowp vec4 color         = texture2D(uSampler, vTextureCoord);
+            lowp float intensity    = (color.r + color.g + color.b) / 3.0;
+            intensity               = (uRange.x * (intensity - 0.5)) + 0.5 + uRange.y;
+            gl_FragColor            = vec4(intensity, intensity, intensity, 1.0);
+        }
+        `
+        function createIntensityShader(context, texture, flip, range) {
+            const shaderProgram     = initShaderProgram(context, shaderSourceIntensityVertex, shaderSourceIntensityFragment)
+            const aVertexPosition   = context.getAttribLocation(shaderProgram, 'aVertexPosition')
+            const aTextureCoord     = context.getAttribLocation(shaderProgram, 'aTextureCoord')
+            const uFlip             = context.getUniformLocation(shaderProgram, 'uFlip')
+            const uRange            = context.getUniformLocation(shaderProgram, 'uRange')
+            const uSampler          = context.getUniformLocation(shaderProgram, 'uSampler')
+            context.useProgram(shaderProgram)
+            context.bindBuffer(context.ARRAY_BUFFER, screenBuffer)
+            context.vertexAttribPointer(aVertexPosition, 2, context.FLOAT, false, 0, 0)
+            context.enableVertexAttribArray(aVertexPosition)
+            context.bindBuffer(context.ARRAY_BUFFER, screenUVBuffer)
+            context.vertexAttribPointer( aTextureCoord, 2, context.FLOAT, false, 0, 0)
+            context.enableVertexAttribArray(aTextureCoord)
+            context.activeTexture(context.TEXTURE0)
+            context.bindTexture(context.TEXTURE_2D, texture)
+            context.uniform1i(uSampler, 0)
             return {
                 program: shaderProgram,
-                buffer: {
-                    position: positionBuffer,
-                    textureCoord: textureCoordBuffer
-                },
-                attribute: {
-                    vertexPosition: context.getAttribLocation(shaderProgram, 'aVertexPosition'),
-                    textureCoord: context.getAttribLocation(shaderProgram, 'aTextureCoord'),
-                },
                 uniform: {
-                    uSampler: context.getUniformLocation(shaderProgram, 'uSampler'),
-                    brightness: context.getUniformLocation(shaderProgram, 'brightness'),
+                    flip: uFlip,
+                    range: uRange,
                 },
-                init(context) {
-                    context.useProgram(shader.program)
-                    context.bindBuffer(context.ARRAY_BUFFER, shader.buffer.position)
-                    context.vertexAttribPointer(
-                        shader.attribute.vertexPosition,
-                        2,
-                        context.FLOAT,
-                        false,
-                        0,
-                        0)
-                    context.enableVertexAttribArray(shader.attribute.vertexPosition)
-                    context.bindBuffer(context.ARRAY_BUFFER, shader.buffer.textureCoord)
-                    context.vertexAttribPointer(
-                        shader.attribute.textureCoord,
-                        2,
-                        context.FLOAT,
-                        false,
-                        0,
-                        0)
-                    context.enableVertexAttribArray(shader.attribute.textureCoord)
-                    context.activeTexture(context.TEXTURE0)
-                    context.bindTexture(context.TEXTURE_2D, texture)
-                    context.uniform1i(shader.uniform.uSampler, 0)
+                render(context, flip, range) {
+                    context.useProgram(this.program)
+                    context.uniform2iv(this.uniform.flip, flip)
+                    context.uniform2fv(this.uniform.range, range)
+                    context.drawArrays(context.TRIANGLES, 0, 6)
+                }
+            }
+        }
+    </script>
+    <script>
+        const shaderSourceGameboyVertex =
+        `
+        attribute lowp vec2 aVertexPosition;
+        attribute lowp vec2 aTextureCoord;
+        varying lowp vec2 vTextureCoord;
+        void main() {
+            gl_Position         = vec4(aVertexPosition.x, 0.0 - aVertexPosition.y, 0.0, 1.0);
+            vTextureCoord       = aTextureCoord;
+        }
+        `
+        const shaderSourceGameboyFragment =
+        `
+        varying lowp vec2 vTextureCoord;
+        uniform sampler2D uSampler;
+        void main() {
+            bool evenColumn     = (mod(floor(gl_FragCoord.x), 2.0) == 0.0);
+            bool evenRow        = (mod(floor(gl_FragCoord.y), 2.0) == 0.0);
+            lowp vec4 color     = texture2D(uSampler, vTextureCoord);
+            lowp float pixel    = color.r * 4.0;
+            lowp float decimal  = mod(pixel, 1.0);
+            if (decimal > 0.25 && .75 < decimal) {
+                if (evenColumn) {
+                    if (evenRow) {
+                        pixel = ceil(pixel);
+                    } else {
+                        pixel = floor(pixel);
+                    }
+                } else {
+                    if (evenRow) {
+                        pixel = floor(pixel);
+                    } else {
+                        pixel = ceil(pixel);
+                    }
+                }
+            } else {
+                pixel = floor(pixel + 0.5);
+            }
+            pixel /= 4.0;
+            
+            gl_FragColor    = vec4(pixel, pixel + .05, pixel, 1.0);
+        }
+        `
+        function createGameboyShader(context, texture) {
+            const shaderProgram     = initShaderProgram(context, shaderSourceGameboyVertex, shaderSourceGameboyFragment)
+            const aVertexPosition   = context.getAttribLocation(shaderProgram, 'aVertexPosition')
+            const aTextureCoord     = context.getAttribLocation(shaderProgram, 'aTextureCoord')
+            const uSampler          = context.getUniformLocation(shaderProgram, 'uSampler')
+            context.useProgram(shaderProgram)
+            context.bindBuffer(context.ARRAY_BUFFER, screenBuffer)
+            context.vertexAttribPointer(aVertexPosition, 2, context.FLOAT, false, 0, 0)
+            context.enableVertexAttribArray(aVertexPosition)
+            context.bindBuffer(context.ARRAY_BUFFER, screenUVBuffer)
+            context.vertexAttribPointer(aTextureCoord, 2, context.FLOAT, false, 0, 0)
+            context.enableVertexAttribArray(aTextureCoord)
+            context.activeTexture(context.TEXTURE0)
+            context.bindTexture(context.TEXTURE_2D, texture)
+            context.uniform1i(uSampler, 0)
+            return {
+                program: shaderProgram,
+                render(context) {
+                    context.useProgram(this.program)
+                    context.drawArrays(context.TRIANGLES, 0, 6)
                 }
             }
         }
@@ -256,18 +302,29 @@
         
         const video                 = document.createElement('video')
         const canvas                = document.getElementById('canvas')
-        const context               = canvas.getContext('webgl', {preserveDrawingBuffer: true})
+        const context               = canvas.getContext('webgl')
         const config                = document.getElementById('config')
+        const configSource          = document.getElementById('config_source')
+        const configContrast        = document.getElementById('config_contrast')
         const configBrightness      = document.getElementById('config_brightness')
         const configDimensionWidth  = document.getElementById('config_dimension_width')
         const configDimensionHeight = document.getElementById('config_dimension_height')
-        const configSource          = document.getElementById('config_source')
+        const configFlipHorizontal  = document.getElementById('config_flip_horizontal')
+        const configFlipVertical    = document.getElementById('config_flip_vertical')
 
         video.loop = true
         video.muted = true
         video.autoplay = true
 
+        let contrast
         let brightness
+        let flipHorizontal
+        let flipVertical
+
+        initBuffers(context)
+        const texture           = initTexture(context)
+        const shaderIntensity   = createIntensityShader(context, texture)
+        const shaderGameboy     = createGameboyShader(context, texture)
 
         function cameraFeed() {
             video.toggleAttribute('src', false)
@@ -285,29 +342,34 @@
         }
 
         function configRefresh() {
-            brightness = configBrightness.value
-            canvas.width = configDimensionWidth.value
-            canvas.height = configDimensionHeight.value
+            contrast        = configContrast.value
+            brightness      = configBrightness.value
+            flipHorizontal  = configFlipHorizontal.checked
+            flipVertical    = configFlipVertical.checked
+            canvas.width    = configDimensionWidth.value
+            canvas.height   = configDimensionHeight.value
         }
         configRefresh()
 
-        const shader = gameboyShader(context)
-        const texture = initTexture(context)
-        shader.init(context)
         function draw(timestamp) {
             updateTexture(context, texture, video)
             context.clearColor(1.0, 0.0, 0.0, 1.0)
             context.clear(context.COLOR_BUFFER_BIT | context.COLOR_BUFFER_BIT)
             context.viewport(0, 0, context.canvas.width, context.canvas.height)
-            context.uniform1f(shader.uniform.brightness, brightness)
-            context.drawArrays(context.TRIANGLES, 0, 6)
+            shaderIntensity.render(context, [flipHorizontal, flipVertical], [contrast, brightness])
+            if (isTakingPicture) {
+                takePicture()
+                isTakingPicture = false
+            }
+            updateTexture(context, texture, canvas)
+            shaderGameboy.render(context)
             requestAnimationFrame(draw)
         }
         
         const filter = {
             matrix:[
-                0,     128,
-                128,    0],
+                0,     128,    
+                192,    64,],
             dimension: 2
         }
         function takePicture() {
@@ -315,14 +377,13 @@
             canvasPicture.width     = canvas.width
             canvasPicture.height    = canvas.height
             const contextPicture    = canvasPicture.getContext('2d')
-            contextPicture.filter   = 'grayscale(1)'
-            contextPicture.drawImage(video, 0, 0)
+            contextPicture.drawImage(canvas, 0, 0, canvas.width, canvas.height)
             let imageData   = contextPicture.getImageData(0, 0, canvas.width, canvas.height)
             let data        = imageData.data
             for (let i = 0; i < data.length; i+=4) {
                 let pixelCount = i / 4
-                let evenRow = (pixelCount % (canvas.width * 2)) > canvas.width
-                if (data[i] > filter.matrix[(filter.dimension % pixelCount) + (evenRow?filter.dimension:0)]) {
+                let row = (Math.floor(pixelCount / canvas.width) % filter.dimension) * filter.dimension
+                if (data[i] > filter.matrix[(pixelCount % filter.dimension) + row]) {
                     data[i] = data[i + 1]  = data[i + 2] = 255
                 } else {
                     data[i] = data[i + 1]  = data[i + 2] = 0
@@ -336,7 +397,9 @@
             }, 'image/png')
         }
         
+        let isTakingPicture = false
         window.addEventListener('keyup',e=>{
+            console.log(e.key)
             switch (e.key) {
                 case 'q':
                     config.toggleAttribute('hidden')
@@ -344,8 +407,8 @@
                 case 'x':
                     window.close()
                 break
-                case 'l':
-                    takePicture()
+                case ' ':
+                    if (!isTakingPicture) isTakingPicture = true
                 break
             }
         }, true)
