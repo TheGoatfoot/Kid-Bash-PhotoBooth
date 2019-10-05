@@ -105,6 +105,8 @@
         </div>
     </div>
     <script>
+        'use strict'
+        //#region WebGL
         function loadShader(context, type, source) {
             const shader = context.createShader(type)
             context.shaderSource(shader, source)
@@ -178,8 +180,8 @@
             context.bindBuffer(context.ARRAY_BUFFER, screenUVBuffer)
             context.bufferData(context.ARRAY_BUFFER, new Float32Array(screenUV), context.STATIC_DRAW)
         }
-    </script>
-    <script>
+        //#endregion
+        //#region Intensity Shader
         const shaderSourceIntensityVertex =
         `
         attribute lowp vec2 aVertexPosition;
@@ -238,16 +240,16 @@
                 }
             }
         }
-    </script>
-    <script>
+        //#endregion
+        //#region Gameboy Shader
         const shaderSourceGameboyVertex =
         `
         attribute lowp vec2 aVertexPosition;
         attribute lowp vec2 aTextureCoord;
         varying lowp vec2 vTextureCoord;
         void main() {
-            gl_Position         = vec4(aVertexPosition.x, 0.0 - aVertexPosition.y, 0.0, 1.0);
-            vTextureCoord       = aTextureCoord;
+            gl_Position     = vec4(aVertexPosition.x, 0.0 - aVertexPosition.y, 0.0, 1.0);
+            vTextureCoord   = aTextureCoord;
         }
         `
         const shaderSourceGameboyFragment =
@@ -279,7 +281,7 @@
             }
             pixel /= 4.0;
             
-            gl_FragColor    = vec4(pixel, pixel + .05, pixel, 1.0);
+            gl_FragColor = vec4(pixel, pixel + .05, pixel, 1.0);
         }
         `
         function createGameboyShader(context, texture) {
