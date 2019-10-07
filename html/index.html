@@ -133,16 +133,24 @@
         }
         function initTexture(context) {
             const texture = context.createTexture()
+            context.activeTexture(context.TEXTURE0)
             context.bindTexture(context.TEXTURE_2D, texture)
             context.texImage2D(context.TEXTURE_2D, 0, context.RGBA, 1, 1, 0, context.RGBA, context.UNSIGNED_BYTE, null)
-            context.texParameteri(context.TEXTURE_2D, context.TEXTURE_MIN_FILTER, context.NEAREST)
             context.texParameteri(context.TEXTURE_2D, context.TEXTURE_WRAP_S, context.CLAMP_TO_EDGE)
             context.texParameteri(context.TEXTURE_2D, context.TEXTURE_WRAP_T, context.CLAMP_TO_EDGE)
+            context.texParameteri(context.TEXTURE_2D, context.TEXTURE_MIN_FILTER, context.NEAREST)
+            context.texParameteri(context.TEXTURE_2D, context.TEXTURE_MAG_FILTER, context.NEAREST)
             return texture
         }
-        function updateTexture(context, texture, src) {
+        function updateTextureSource(context, texture, src) {
+            context.activeTexture(context.TEXTURE0)
             context.bindTexture(context.TEXTURE_2D, texture)
             context.texImage2D(context.TEXTURE_2D, 0, context.RGBA, context.RGBA, context.UNSIGNED_BYTE, src)
+        }
+        function updateTextureSize(context, texture, width, height) {
+            context.activeTexture(context.TEXTURE0)
+            context.bindTexture(context.TEXTURE_2D, texture)
+            context.texImage2D(context.TEXTURE_2D, 0, context.RGBA, width, height, 0, context.RGBA, context.UNSIGNED_BYTE, null)
         }
         function createFrameBuffer(context) {
             const frameBuffer   = context.createFramebuffer()
@@ -183,11 +191,11 @@
         //#endregion
         //#region Intensity Shader
         const shaderSourceIntensityVertex =
-        `
-        attribute lowp vec2 aVertexPosition;
-        attribute lowp vec2 aTextureCoord;
-        uniform lowp ivec2 uFlip;
-        varying lowp vec2 vTextureCoord;
+        `#version 300 es
+        in vec2 aVertexPosition;
+        in vec2 aTextureCoord;
+        uniform ivec2 uFlip;
+        out vec2 vTextureCoord;
         void main() {
             gl_Position     = vec4(
                 uFlip.x != 0 ? aVertexPosition.x : 0.0 - aVertexPosition.x, 
@@ -198,18 +206,20 @@
         }
         `
         const shaderSourceIntensityFragment =
-        `
-        varying lowp vec2 vTextureCoord;
-        uniform lowp vec2 uRange;
+        `#version 300 es
+        precision lowp float;
+        in vec2 vTextureCoord;
+        uniform vec2 uRange;
         uniform sampler2D uSampler;
+        out vec4 outColor;
         void main() {
-            lowp vec4 color         = texture2D(uSampler, vTextureCoord);
-            lowp float intensity    = (color.r + color.g + color.b) / 3.0;
-            intensity               = (uRange.x * (intensity - 0.5)) + 0.5 + uRange.y;
-            gl_FragColor            = vec4(intensity, intensity, intensity, 1.0);
+            vec4 color      = texture(uSampler, vTextureCoord);
+            float intensity = (color.r + color.g + color.b) / 3.0;
+            intensity       = (uRange.x * (intensity - 0.5)) + 0.5 + uRange.y;
+            outColor        = vec4(intensity, intensity, intensity, 1.0);
         }
         `
-        function createIntensityShader(context, texture, flip, range) {
+        function createIntensityShader(context, texture) {
             const shaderProgram     = initShaderProgram(context, shaderSourceIntensityVertex, shaderSourceIntensityFragment)
             const aVertexPosition   = context.getAttribLocation(shaderProgram, 'aVertexPosition')
             const aTextureCoord     = context.getAttribLocation(shaderProgram, 'aTextureCoord')
@@ -221,10 +231,8 @@
             context.vertexAttribPointer(aVertexPosition, 2, context.FLOAT, false, 0, 0)
             context.enableVertexAttribArray(aVertexPosition)
             context.bindBuffer(context.ARRAY_BUFFER, screenUVBuffer)
-            context.vertexAttribPointer( aTextureCoord, 2, context.FLOAT, false, 0, 0)
+            context.vertexAttribPointer(aTextureCoord, 2, context.FLOAT, false, 0, 0)
             context.enableVertexAttribArray(aTextureCoord)
-            context.activeTexture(context.TEXTURE0)
-            context.bindTexture(context.TEXTURE_2D, texture)
             context.uniform1i(uSampler, 0)
             return {
                 program: shaderProgram,
@@ -232,8 +240,11 @@
                     flip: uFlip,
                     range: uRange,
                 },
+                texture: texture,
                 render(context, flip, range) {
                     context.useProgram(this.program)
+                    context.activeTexture(context.TEXTURE0)
+                    context.bindTexture(context.TEXTURE_2D, this.texture)
                     context.uniform2iv(this.uniform.flip, flip)
                     context.uniform2fv(this.uniform.range, range)
                     context.drawArrays(context.TRIANGLES, 0, 6)
@@ -243,25 +254,27 @@
         //#endregion
         //#region Gameboy Shader
         const shaderSourceGameboyVertex =
-        `
-        attribute lowp vec2 aVertexPosition;
-        attribute lowp vec2 aTextureCoord;
-        varying lowp vec2 vTextureCoord;
+        `#version 300 es
+        in vec2 aVertexPosition;
+        in vec2 aTextureCoord;
+        out vec2 vTextureCoord;
         void main() {
-            gl_Position     = vec4(aVertexPosition.x, 0.0 - aVertexPosition.y, 0.0, 1.0);
+            gl_Position     = vec4(aVertexPosition.x, aVertexPosition.y, 0.0, 1.0);
             vTextureCoord   = aTextureCoord;
         }
         `
         const shaderSourceGameboyFragment =
-        `
-        varying lowp vec2 vTextureCoord;
+        `#version 300 es
+        precision lowp float;
+        in vec2 vTextureCoord;
         uniform sampler2D uSampler;
+        out vec4 outColor;
         void main() {
             bool evenColumn     = (mod(floor(gl_FragCoord.x), 2.0) == 0.0);
             bool evenRow        = (mod(floor(gl_FragCoord.y), 2.0) == 0.0);
-            lowp vec4 color     = texture2D(uSampler, vTextureCoord);
-            lowp float pixel    = color.r * 4.0;
-            lowp float decimal  = mod(pixel, 1.0);
+            vec4 color          = texture(uSampler, vTextureCoord);
+            float pixel         = color.r * 4.0;
+            float decimal       = mod(pixel, 1.0);
             if (decimal > 0.25 && .75 < decimal) {
                 if (evenColumn) {
                     if (evenRow) {
@@ -281,7 +294,7 @@
             }
             pixel /= 4.0;
             
-            gl_FragColor = vec4(pixel, pixel + .05, pixel, 1.0);
+            outColor = vec4(pixel, pixel + .05, pixel, 1.0);
         }
         `
         function createGameboyShader(context, texture) {
@@ -296,13 +309,14 @@
             context.bindBuffer(context.ARRAY_BUFFER, screenUVBuffer)
             context.vertexAttribPointer(aTextureCoord, 2, context.FLOAT, false, 0, 0)
             context.enableVertexAttribArray(aTextureCoord)
-            context.activeTexture(context.TEXTURE0)
-            context.bindTexture(context.TEXTURE_2D, texture)
             context.uniform1i(uSampler, 0)
             return {
                 program: shaderProgram,
+                texture: texture,
                 render(context) {
                     context.useProgram(this.program)
+                    context.activeTexture(context.TEXTURE0)
+                    context.bindTexture(context.TEXTURE_2D, this.texture)
                     context.drawArrays(context.TRIANGLES, 0, 6)
                 }
             }
@@ -310,37 +324,39 @@
         //#endregion
         //#region Dither Shader
         const shaderSourceDitherVertex =
-        `
-        attribute lowp vec2 aVertexPosition;
-        attribute lowp vec2 aTextureCoord;
-        varying lowp vec2 vTextureCoord;
+        `#version 300 es
+        in vec2 aVertexPosition;
+        in vec2 aTextureCoord;
+        out vec2 vTextureCoord;
         void main() {
-            gl_Position     = vec4(aVertexPosition.x, 0.0 - aVertexPosition.y, 0.0, 1.0);
+            gl_Position     = vec4(aVertexPosition.x, aVertexPosition.y, 0.0, 1.0);
             vTextureCoord   = aTextureCoord;
         }
         `
         const shaderSourceDitherFragment =
-        `
-        const lowp float DIMENSION  = 2.0;
-        const lowp int MATRIX_SIZE  = 4;
-        varying lowp vec2 vTextureCoord;
+        `#version 300 es
+        precision lowp float;
+        const float DIMENSION  = 2.0;
+        const int MATRIX_SIZE  = 4;
+        in vec2 vTextureCoord;
         uniform sampler2D uSampler;
-        uniform lowp float uFilter[MATRIX_SIZE];
+        uniform float uFilter[MATRIX_SIZE];
+        out vec4 outColor;
         void main() {
-            lowp vec4 color     = texture2D(uSampler, vTextureCoord);
-            lowp int a = int(mod(gl_FragCoord.x, DIMENSION) + mod(gl_FragCoord.y, DIMENSION));
-            if (color.r > uFilter[a]) {
-                gl_FragColor    = vec4(1.0, 1.0, 1.0, 1.0);
+            vec4 color     = texture(uSampler, vTextureCoord);
+            if (color.r > uFilter[int(mod(gl_FragCoord.x, DIMENSION) + (mod(gl_FragCoord.y, DIMENSION) * DIMENSION))]) {
+                outColor    = vec4(1.0, 1.0, 1.0, 1.0);
             } else {
-                gl_FragColor    = vec4(0.0, 0.0, 0.0, 1.0);
+                outColor    = vec4(0.0, 0.0, 0.0, 1.0);
             }
         }
         `
-        function createDitherShader(context, texture, flip, range) {
+        function createDitherShader(context, texture) {
             const shaderProgram     = initShaderProgram(context, shaderSourceDitherVertex, shaderSourceDitherFragment)
             const aVertexPosition   = context.getAttribLocation(shaderProgram, 'aVertexPosition')
             const aTextureCoord     = context.getAttribLocation(shaderProgram, 'aTextureCoord')
             const uSampler          = context.getUniformLocation(shaderProgram, 'uSampler')
+            const uFilter           = context.getUniformLocation(shaderProgram, 'uFilter')
             context.useProgram(shaderProgram)
             context.bindBuffer(context.ARRAY_BUFFER, screenBuffer)
             context.vertexAttribPointer(aVertexPosition, 2, context.FLOAT, false, 0, 0)
@@ -348,13 +364,18 @@
             context.bindBuffer(context.ARRAY_BUFFER, screenUVBuffer)
             context.vertexAttribPointer( aTextureCoord, 2, context.FLOAT, false, 0, 0)
             context.enableVertexAttribArray(aTextureCoord)
-            context.activeTexture(context.TEXTURE0)
-            context.bindTexture(context.TEXTURE_2D, texture)
             context.uniform1i(uSampler, 0)
             return {
                 program: shaderProgram,
+                uniform: {
+                    filter: uFilter
+                },
+                texture: texture,
                 render(context, flip, range) {
                     context.useProgram(this.program)
+                    context.activeTexture(context.TEXTURE0)
+                    context.bindTexture(context.TEXTURE_2D, this.texture)
+                    context.uniform1fv(this.uniform.filter, [0, .5, .75, .25])
                     context.drawArrays(context.TRIANGLES, 0, 6)
                 }
             }
@@ -365,7 +386,7 @@
         
         const video                 = document.createElement('video')
         const canvas                = document.getElementById('canvas')
-        const context               = canvas.getContext('webgl')
+        const context               = canvas.getContext('webgl2')
         const config                = document.getElementById('config')
         const configSource          = document.getElementById('config_source')
         const configContrast        = document.getElementById('config_contrast')
@@ -409,55 +430,32 @@
         function configRefresh() {
             contrast        = configContrast.value
             brightness      = configBrightness.value
-            flipHorizontal  = configFlipHorizontal.checked
-            flipVertical    = configFlipVertical.checked
+            flipHorizontal  = configFlipHorizontal.checked?1:0
+            flipVertical    = configFlipVertical.checked?1:0
             canvas.width    = configDimensionWidth.value
             canvas.height   = configDimensionHeight.value
+            updateTextureSize(context, bufferIntensity.texture, context.canvas.width, context.canvas.height)
         }
         configRefresh()
 
         function draw(timestamp) {
-            updateTexture(context, texture, video)
+            updateTextureSource(context, texture, video)
             context.clearColor(1.0, 0.0, 0.0, 1.0)
             context.clear(context.COLOR_BUFFER_BIT | context.COLOR_BUFFER_BIT)
             context.viewport(0, 0, context.canvas.width, context.canvas.height)
             context.bindFramebuffer(context.FRAMEBUFFER, bufferIntensity.buffer)
             shaderIntensity.render(context, [flipHorizontal, flipVertical], [contrast, brightness])
+            context.bindFramebuffer(context.FRAMEBUFFER, null)
             if (isTakingPicture) {
-                context.bindFramebuffer(context.FRAMEBUFFER, null)
                 shaderDither.render(context)
                 takePicture()
                 isTakingPicture = false
             }
-            context.bindFramebuffer(context.FRAMEBUFFER, null)
             shaderGameboy.render(context)
             requestAnimationFrame(draw)
         }
         
-        // const filter = {
-        //     matrix:[
-        //         0,     128,    
-        //         192,    64,],
-        //     dimension: 2
-        // }
         function takePicture() {
-            // const canvasPicture     = document.createElement('canvas')
-            // canvasPicture.width     = canvas.width
-            // canvasPicture.height    = canvas.height
-            // const contextPicture    = canvasPicture.getContext('2d')
-            // contextPicture.drawImage(canvas, 0, 0, canvas.width, canvas.height)
-            // let imageData   = contextPicture.getImageData(0, 0, canvas.width, canvas.height)
-            // let data        = imageData.data
-            // for (let i = 0; i < data.length; i+=4) {
-            //     let pixelCount = i / 4
-            //     let row = (Math.floor(pixelCount / canvas.width) % filter.dimension) * filter.dimension
-            //     if (data[i] > filter.matrix[(pixelCount % filter.dimension) + row]) {
-            //         data[i] = data[i + 1]  = data[i + 2] = 255
-            //     } else {
-            //         data[i] = data[i + 1]  = data[i + 2] = 0
-            //     }
-            // }
-            // contextPicture.putImageData(imageData, 0, 0)
             canvas.toBlob(blob=>{
                 blob
                 .arrayBuffer()
@@ -467,7 +465,6 @@
         
         let isTakingPicture = false
         window.addEventListener('keyup',e=>{
-            console.log(e.key)
             switch (e.key) {
                 case 'q':
                     config.toggleAttribute('hidden')
