@@ -17,20 +17,12 @@ app.on('ready',()=>{
 })
 
 exports.print = (arrayBuffer)=>{
-    fs.writeFile("./hello.png", Buffer.from(arrayBuffer), err=>{
-        console.log(err)
+    escpos.Image.load(Buffer.from(arrayBuffer), 'image/png', image=>{
+        device.open(()=>{
+            printer.align('ct')
+            printer.raster(image, 'dwdh')
+            printer.cut()
+            printer.close()
+        })
     })
 }
-/*
-escpos.Image.load('FRAME.png', 'image/png', image=>{
-    
-    console.log(image)
-    device.open(()=>{
-        printer.align('ct')
-        printer.text('image')
-        printer.raster(image, 'dwdh')
-        printer.cut()
-        printer.close()
-    })
-})
-*/
